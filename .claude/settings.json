@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "WebSearch",
+      "WebFetch(domain:twitterscore.gitbook.io)",
+      "WebFetch(domain:developers.ethos.network)",
+      "WebFetch(domain:www.ethos.network)",
+      "WebFetch(domain:docs.protokols.com)",
+      "WebFetch(domain:docs.elfa.ai)",
+      "WebFetch(domain:dexu.ai)",
+      "WebFetch(domain:dapplooker.com)",
+      "WebFetch(domain:protokols.com)",
+      "WebFetch(domain:elfa.ai)",
+      "WebFetch(domain:www.protokols.io)",
+      "WebFetch(domain:docs.protokols.io)"
+    ]
+  }
+}
