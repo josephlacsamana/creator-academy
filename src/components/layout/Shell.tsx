@@ -1,6 +1,8 @@
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { MobileNav } from "./MobileNav";
+import { WindowBanner } from "../ui/WindowBanner";
+import { FloatingClaimBar } from "../feed/FloatingClaimBar";
 
 export function Shell() {
   return (
@@ -14,9 +16,13 @@ export function Shell() {
       {/* Main content */}
       <main className="lg:pl-64">
         <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+          <WindowBanner />
           <Outlet />
         </div>
       </main>
+
+      {/* Floating claim bar */}
+      <FloatingClaimBar />
 
       {/* Mobile bottom nav */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card lg:hidden">

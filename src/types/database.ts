@@ -36,6 +36,8 @@ export interface User {
   updated_at: string;
 }
 
+export type SubmitMode = "goal" | "credit";
+
 export interface TweetRequest {
   id: string;
   user_id: string;
@@ -51,6 +53,17 @@ export interface TweetRequest {
   cooldown_until: string | null;
   created_at: string;
   user?: User;
+  // Window system fields (Phase 5+)
+  window_id: string | null;
+  likes_goal: number;
+  comments_goal: number;
+  reposts_goal: number;
+  bookmarks_goal: number;
+  likes_fulfilled: number;
+  comments_fulfilled: number;
+  reposts_fulfilled: number;
+  bookmarks_fulfilled: number;
+  submit_mode: SubmitMode;
 }
 
 export interface Engagement {
@@ -73,6 +86,22 @@ export interface Transaction {
   reference_id: string | null;
   description: string;
   created_at: string;
+}
+
+export type WindowPhase = "submit" | "engage" | "cooldown" | "between";
+
+export interface WindowInfo {
+  windowNumber: number; // 1-5
+  windowId: string; // "2026-03-13_W1"
+  phase: WindowPhase;
+  phaseLabel: string; // "Submit + Preview", "Engage", "Cooldown", "Between Windows"
+  phaseEndsAt: Date;
+  windowStartsAt: Date;
+  windowEndsAt: Date;
+  canSubmit: boolean;
+  canClaim: boolean;
+  timeRemainingMs: number;
+  nextWindowStartsAt: Date | null;
 }
 
 export interface CreditSupply {
@@ -107,7 +136,6 @@ export interface Database {
         Insert: Omit<Transaction, "id" | "created_at">;
         Update: Partial<Omit<Transaction, "id" | "created_at">>;
       };
-    };
       credit_supply: {
         Row: CreditSupply;
         Insert: Omit<CreditSupply, "updated_at">;
@@ -142,6 +170,57 @@ export interface Database {
           p_engagement_type: string;
         };
         Returns: string;
+      };
+      submit_tweet_v2: {
+        Args: {
+          p_tweet_url: string;
+          p_tweet_id: string;
+          p_window_id: string;
+          p_likes_goal: number;
+          p_comments_goal: number;
+          p_reposts_goal: number;
+          p_bookmarks_goal: number;
+          p_credits_deposited: number;
+          p_submit_mode: string;
+        };
+        Returns: string;
+      };
+      claim_engagement_v2: {
+        Args: {
+          p_tweet_request_id: string;
+          p_engagement_type: string;
+        };
+        Returns: string;
+      };
+      top_up_request: {
+        Args: {
+          p_request_id: string;
+          p_amount: number;
+        };
+        Returns: number;
+      };
+      settle_window: {
+        Args: {
+          p_window_id: string;
+        };
+        Returns: number;
+      };
+      get_leaderboard: {
+        Args: {
+          p_period: string;
+          p_limit: number;
+        };
+        Returns: {
+          user_id: string;
+          x_username: string;
+          x_display_name: string;
+          x_avatar_url: string;
+          is_verified: boolean;
+          tweet_score: number | null;
+          ethos_score: number | null;
+          total_credits_collected: number;
+          total_engagements: number;
+        }[];
       };
     };
     Enums: {

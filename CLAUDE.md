@@ -43,6 +43,7 @@ supabase/
 ```
 VITE_SUPABASE_URL=https://dtmvbxjrqianwweazfwv.supabase.co
 VITE_SUPABASE_ANON_KEY=<stored in .env>
+VITE_RAPIDAPI_KEY=<stored in .env>
 ```
 
 ## External Services (CONFIGURED)
@@ -64,12 +65,24 @@ VITE_SUPABASE_ANON_KEY=<stored in .env>
 - **App permissions:** Read
 - **RLS fix applied:** Admin policies use auth.jwt() instead of subquery to avoid infinite recursion
 
+### Twitter241 / Twttr API (RapidAPI) — Engagement Verification
+- **Provider:** Twitter241 by davethebeast on RapidAPI
+- **Plan:** Basic (free) — 500 requests/month, 1000 req/hour rate limit
+- **API Key:** stored in .env as VITE_RAPIDAPI_KEY
+- **Host:** twitter241.p.rapidapi.com
+- **Endpoints used:** `/post-comments` (verify comments), `/post-retweets` (verify reposts)
+- **No likers endpoint** — likes are trust-based (auto-verified)
+- **Bookmarks** — trust-based (no API can verify)
+- **Scale plan:** Upgrade to Pro ($25/mo, 100K requests) when needed; optionally add TwitterAPI.io for reposts+comments at scale
+
 ## Database
-- Schema: `supabase/migrations/001_initial_schema.sql` + `002_credit_supply_and_escrow.sql`
+- Schema: migrations 001 through 006 — 001-005 executed, 006 pending
+- Migrations: `001_initial_schema` + `002_credit_supply_and_escrow` + `003_fix_admin_rls_recursion` + `004_user_scores` + `005_claim_engagement` + `006_leaderboard`
 - Tables: `users`, `tweet_requests`, `engagements`, `transactions`, `credit_supply`
-- RLS enabled on all tables
-- RPC functions: `submit_tweet_with_escrow`, `cancel_tweet_request`, `toggle_tweet_request_pause`
+- RLS enabled on all tables + "Authenticated users can read all profiles" policy (added in 005)
+- RPC functions: `submit_tweet_with_escrow`, `cancel_tweet_request`, `toggle_tweet_request_pause`, `claim_engagement`, `get_leaderboard`
 - `users` table includes: `tweet_score`, `ethos_score`, `is_verified` (blue badge), `scores_updated_at` — migration 004 executed
+- `claim_engagement` RPC: auto-verified for MVP, transfers credits from escrow to engager — migration 005 executed
 
 ## Credit Economy
 ### Supply
@@ -120,6 +133,95 @@ Displayed next to creator names throughout the platform (feed, leaderboard, prof
 - Bookmarks are trust-based (cannot be verified)
 - Batch verification with 5-min caching to reduce API costs
 
+## Engagement Exchange v2 — Windowed System
+
+### Window Schedule (5 daily windows, 3hrs each, PH time = UTC+8)
+
+| Window | PH Time | UTC Time |
+|--------|---------|----------|
+| W1 | 8:30 AM – 11:30 AM | 00:30 – 03:30 |
+| W2 | 2:30 PM – 5:30 PM | 06:30 – 09:30 |
+| W3 | 5:30 PM – 8:30 PM | 09:30 – 12:30 |
+| W4 | 8:30 PM – 11:30 PM | 12:30 – 15:30 |
+| W5 | 11:30 PM – 2:30 AM | 15:30 – 18:30 |
+
+2-hour gap between windows. Admin-adjustable.
+
+### Window Phases (per 3-hour window)
+
+**Submit + Preview (1 hour):**
+- Drop tweet link, set engagement goals (or raw budget)
+- 1 tweet max per user per window
+- Minimum deposit: 50 credits
+- Feed shows submitted requests immediately (sorted by highest credits on top)
+- Cards have shaking/glow animation to build hype
+- Countdown timer to engage phase
+- Users can "Open on X" and engage early — just can't claim yet
+- Toggle buttons ("I liked", "I commented") are gray/disabled with tooltip
+- Your own request visible (marked as yours, can't engage)
+
+**Engage (1.5 hours):**
+- Toggle buttons go LIVE (yellow #F5B526)
+- Claiming happens via floating claim bar (not per-card buttons)
+- FCFS per engagement type (likes goal met → no more likes, comments may still have budget)
+- Auto-funnel: credits you collect → auto-add to your active request's budget
+- No active request → credits go to balance normally
+- Top-up: manually add credits from balance to your request anytime
+- Feed sorted by available credits (highest on top), reorders on refresh/return only
+- Cards you've fully engaged with disappear from feed
+- **Late submissions allowed** during first 1hr of engage phase (locked during last 30min)
+- Late submitters see warning: "X min left to get engagement"
+
+**Cooldown (30 min):**
+- Verification settles
+- Unused credits from request → returned to balance
+- Countdown timer to next window
+
+### Submission Timeline (using W1 as example)
+```
+8:30 ──── 9:30 ──────── 10:30 ──── 11:00 ──── 11:30
+│ Submit + │    Engage Phase       │  Cooldown  │
+│ Preview  │                       │            │
+├─── Can submit ──────┤ Can't sub. ┤            │
+│    Can't claim      ├──── Can claim ──────────┤
+```
+
+### Submit UX — Two Modes
+
+**Goal Mode (default):** User inputs how many likes, comments, reposts, bookmarks they want. System calculates total credits. User sets initial deposit (min 50, can be less than total — auto-funnel fills the rest).
+
+**Credit Mode (toggle):** Raw budget slider + engagement type checkboxes. No per-type goals, just total budget with FCFS across all types. For advanced users.
+
+### Feed Card Design
+- Shows creator info (avatar, name, badges)
+- Available credits (big, prominent) + funded progress bar (e.g., "152/210 funded")
+- "Open on X" link
+- Per-type progress counters (e.g., "23/50 likes", "12/100 comments")
+- Toggle buttons: "I liked" / "I commented" / "I reposted" / "I bookmarked"
+- Your own request: shows auto-funnel status ("Budget growing — you're engaging!") + "Add credits" button
+- Budget empty → card grays out, shows "BUDGET EMPTY"
+- Type full → that toggle shows "FULL" (grayed out)
+
+### Floating Claim Bar
+- Sticky bar at bottom of screen, only visible when pending claims exist
+- Collapsed: "🟡 3 ready to claim [Claim All]"
+- Expanded: shows individual chips (👍 @creator1 +1cr, 💬 @creator2 +1cr) with [×] to remove
+- "Claim All" → batch verify + claim everything at once
+- During claiming: spinner, all interactions disabled
+- Claimed chips animate out, bar slides away when empty
+
+### Credit Flow Per Window
+1. **Submit:** Balance → deposit (min 50) → request budget (escrowed)
+2. **Engage:** User engages others → collects credits → auto-funnel to active request budget
+3. **FCFS:** Others engage your tweet → credits transfer from your budget per type until goals met or budget empty
+4. **Settlement:** Window ends → unused credits from request → returned to balance
+5. **No submission:** Earned credits go to balance normally
+
+### "Your Claims" Section
+- Top of feed: sticky section showing your claimed engagements this window
+- Cards move from main feed → "Your Claims" after fully engaging
+- Partial claims stay in both sections (claimed types shown, remaining types still in feed)
+
 ---
 
 ## Build Phases
@@ -162,49 +264,125 @@ Displayed next to creator names throughout the platform (feed, leaderboard, prof
 - [x] Transaction history on Profile page (full list with type badges)
 - [x] React Query hooks (useMyRequests, useSubmitTweet, useCancelRequest, useTogglePause, useTransactions, useDashboardStats)
 
-#### Phase 3: Engagement Feed + Verification
-- [ ] Tweet card component (preview, actions, credits)
-- [ ] Engagement feed with filters
-- [ ] "Engage" → open on X + "Claim" flow
-- [ ] RapidAPI integration (select provider, test)
-- [ ] Verification service (likes, reposts, comments)
-- [ ] Bookmark auto-verify (trust-based)
-- [ ] Batch verification + caching
-- [ ] Credit transfer on verified engagement
+#### Phase 3: Basic Engagement Feed + Verification ← DONE (will be upgraded by Window System)
+- [x] Tweet card component (creator info, "Open on X" link, engagement buttons with credit amounts, budget progress bar)
+- [x] Engagement feed page (shows active tweets from other users, auto-refreshes every 30s)
+- [x] "Open on X" link + "Claim" buttons per engagement type (Like/Comment/Repost/Bookmark)
+- [x] claim_engagement RPC (migration 005: validates, prevents duplicates, transfers credits, auto-completes when budget exhausted)
+- [x] Credit transfer on verified engagement (auto-verified for MVP)
+- [x] React Query hooks (useFeed, useClaimEngagement)
+- [x] RLS policy: authenticated users can read all profiles (needed for feed user joins)
+- [x] RapidAPI integration — Twitter241 (free plan, 500 req/mo) for comment + repost verification
+- [x] Verification service (src/lib/twitter-verify.ts) — comments via /post-comments, reposts via /post-retweets
+- [x] Likes + bookmarks trust-based (auto-verified, no API available for likers)
+- [x] 5-min response caching (multiple claims on same tweet share one API call, saves requests)
+- [ ] (OPTIONAL / EMERGENCY) TwitterAPI.io — pay-per-use ($0.15/1K requests), has retweeters + replies endpoints, no likers. Use as backup if Twitter241 goes down or hits limits. No free tier.
 
-#### Phase 4: Dashboard Stats + Leaderboard
-- [ ] Real dashboard stats (given/received today, weekly)
-- [ ] Leaderboard (weekly/monthly/all-time)
-- [ ] Full transaction history
-- [ ] Community stats on landing page
+#### Phase 4: Dashboard Stats + Leaderboard ← DONE
+- [x] Dashboard stats: spent/collected today + weekly stats
+- [x] Leaderboard with weekly/monthly/all-time tabs (get_leaderboard RPC, migration 006)
+- [x] Full transaction history (on Profile page, already done in Phase 2)
+- [ ] Community stats on landing page (total users, engagements — nice-to-have)
 
-#### Phase 5: Admin Panel
+#### Phase 5: Window System — Database + State Engine ← DONE
+- [x] Computed schedule from UTC constants (src/lib/window-engine.ts)
+- [x] Window state engine: compute current window + phase from UTC time (submit/engage/cooldown/between)
+- [x] Modified `tweet_requests` table: add `window_id`, per-type goal columns + fulfilled counters + `submit_mode`
+- [x] Constraint: 1 tweet request per user per window (partial unique index)
+- [x] TypeScript types for window state, phases, schedule (WindowPhase, WindowInfo, SubmitMode)
+- [x] `useCurrentWindow` hook — returns current window, phase, time remaining, next window (updates every second)
+- [x] Window status banner component (shows current phase + countdown timer, visible on all pages)
+- [x] Between-windows state: "Next window opens in X:XX" countdown
+- [x] Migration 007: new columns + indexes + 4 new RPCs (submit_tweet_v2, claim_engagement_v2, top_up_request, settle_window)
+
+#### Phase 6: New Submit UX (Goal Mode + Credit Mode) ← DONE
+- [x] Goal Mode (default): per-type stepper inputs (+/- buttons) for likes, comments, reposts, bookmarks
+- [x] Credit Mode (toggle): raw budget slider + engagement type checkboxes
+- [x] Seamless toggle between modes with ArrowRightLeft button
+- [x] Minimum deposit: 50 credits, deposit slider, can deposit less than total goal (auto-funnel fills rest)
+- [x] Submission rules enforced: 1 per window, blocked during cooldown/between windows, blocked last 30min of engage
+- [x] Warning for late submitters: "only X minutes of engagement time remaining"
+- [x] Info box explaining credit gap + auto-funnel
+- [x] After submit → redirect to feed
+- [x] `useSubmitTweetV2` hook calling `submit_tweet_v2` RPC with window_id + per-type goals
+
+#### Phase 7: Windowed Feed + Live Leaderboard ← DONE
+- [x] Feed sorted by available credits (highest on top) via credits_remaining DESC
+- [x] Submit+Preview phase: cards with disabled toggles + phase info bar
+- [x] Engage phase: toggle buttons go live with verify-then-claim flow
+- [x] FCFS per engagement type: type full → "FULL" badge (Lock icon, grayed out)
+- [x] Per-type progress counters on each card (e.g., "23/50 likes")
+- [x] Funded progress bar per card (credits_remaining / credits_deposited)
+- [x] Your own request card (YourRequestCard): pinned, auto-funnel indicator, per-type progress
+- [x] "Your Claims" sticky section at top of feed (YourClaims component)
+- [x] Feed window-filtered by current window_id
+- [x] Live polling every 10s during engage phase, 30s otherwise
+- [x] Late submission support (prompt to submit during first 60min of engage)
+- [x] `useClaimEngagementV2` hook calling `claim_engagement_v2` RPC
+- [x] Phase-aware empty states and info bars (submit/engage/cooldown/between)
+
+#### Phase 8: Floating Claim Bar ← DONE
+- [x] "I engaged" toggle buttons on feed cards (replaces direct claim buttons)
+- [x] Toggling "I liked" → adds to floating claim bar queue (Zustand claim-queue-store)
+- [x] Floating sticky bar at bottom of screen (only visible when pending claims exist)
+- [x] Collapsed view: "X ready to claim +Y credits [Claim All]" with pulsing status dot
+- [x] Expanded view: individual chips with creator name + type + credit amount + [×] remove
+- [x] "Claim All" → batch verify (Twitter241 API) + claim all at once
+- [x] Individual chip tap → claim just that one
+- [x] Loading state: spinner on bar, all interactions disabled during verification
+- [x] Claimed chips animate out (Framer Motion), bar slides away when empty
+- [x] Bar hidden completely when nothing to claim
+
+#### Phase 9: Auto-Funnel + Top-Up + Settlement ← DONE
+- [x] Auto-funnel: handled in `claim_engagement_v2` RPC — routes earned credits to engager's active request in same window
+- [x] Auto-funnel indicator on YourRequestCard: "Zap Auto-funnel active" badge
+- [x] If no active request → earned credits go to balance normally (handled in RPC)
+- [x] Top-up: "Add credits from balance" button on YourRequestCard with slider + amount input
+- [x] `useTopUpRequest` hook calling `top_up_request` RPC
+- [x] Window settlement: `useAutoSettle` hook auto-triggers `settle_window` during cooldown phase (once per window)
+- [x] `useSettleWindow` hook calling `settle_window` RPC
+- [x] Settlement transaction logs handled in RPC ("Window X settled: Y credits returned")
+- [x] `claim_engagement_v2` RPC already handles auto-funnel routing (migration 007)
+
+#### Phase 10: Window Polish + Animations
+- [ ] Shaking/glow animation on cards during Submit+Preview phase (Framer Motion)
+- [ ] Smooth card reorder animations when feed updates
+- [ ] Claim success animations (checkmark, chip fly-out)
+- [ ] Window phase transition animations (Submit → Engage → Cooldown)
+- [ ] Countdown timer animations (pulse when <5 min remaining)
+- [ ] Toast notifications: "Window 3 is open!", "Engage phase starting!", "Your request collected 45 credits!"
+- [ ] Sound/haptic feedback on claim success (optional, mobile)
+- [ ] Cooldown summary screen (your window stats: credits spent, collected, engagements given/received)
+
+#### Phase 11: Admin Panel
 - [ ] Admin route guard
 - [ ] User management (search, ban, adjust credits)
-- [ ] Credit supply dashboard (circulating, locked, burned, total)
+- [ ] Credit supply dashboard (circulating, locked, total)
 - [ ] Unlock credits from locked pool
-- [ ] Analytics dashboard
-- [ ] Cooldown settings
-- [ ] Verification rate monitoring
+- [ ] Window schedule management (adjust times, enable/disable windows)
+- [ ] Analytics dashboard (per-window stats: submissions, engagements, credits flow)
+- [ ] Verification rate monitoring (Twitter241 API usage tracking)
 
-#### Phase 6: Cooldown + Anti-Abuse
+#### Phase 12: Cooldown + Anti-Abuse
 - [ ] Auto-cooldown on engagement spikes
-- [ ] Rate limiting per user
+- [ ] Rate limiting per user per window
 - [ ] Trust score calculation
-- [ ] Self-engagement + duplicate prevention
+- [ ] Self-engagement prevention (already in RPC, but add UI safeguards)
+- [ ] Duplicate engagement prevention (already in RPC)
+- [ ] Suspicious pattern detection (e.g., always engaging only the cheapest types)
 
-#### Phase 7: Polish + Responsive
-- [ ] Mobile responsive refinements
+#### Phase 13: Polish + Responsive
+- [ ] Mobile responsive refinements (floating claim bar on mobile, touch-friendly toggles)
 - [ ] Framer Motion page transitions
-- [ ] Loading/empty/error states
-- [ ] Toast notifications
-- [ ] PWA setup
+- [ ] Loading/empty/error states for all window phases
+- [ ] Toast notifications system
+- [ ] PWA setup (push notifications for window openings)
 
 ---
 
 ### PART 2: BRAND & AGENCY ACCOUNTS (Revenue)
 
-#### Phase 8: Brand Account System
+#### Phase 14: Brand Account System
 - [ ] Brand/Agency account type (separate from creator)
 - [ ] Brand signup flow + approval process
 - [ ] Brand dashboard (different from creator dashboard)
@@ -212,9 +390,9 @@ Displayed next to creator names throughout the platform (feed, leaderboard, prof
 - [ ] Payment integration (Stripe or similar)
 - [ ] Mint purchased credits from locked supply
 
-#### Phase 9: Brand Content + Promoted Feed
+#### Phase 15: Brand Content + Promoted Feed
 - [ ] Brand content submission (same flow, premium placement)
-- [ ] Promoted/pinned content at top of engagement feed
+- [ ] Promoted/pinned content at top of engagement feed (above regular window requests)
 - [ ] "Sponsored" badge on brand content
 - [ ] Higher credit rates for brand engagement (e.g., Like = 3cr, Comment = 5cr)
 - [ ] Brand analytics (impressions, engagements, spend)
@@ -223,7 +401,7 @@ Displayed next to creator names throughout the platform (feed, leaderboard, prof
 
 ### PART 2.5: CREDIT STORE + RETENTION
 
-#### Phase 10: Creator Credit Store + Retention Mechanics
+#### Phase 16: Creator Credit Store + Retention Mechanics
 - [ ] Buy credits UI (credit packages: e.g., 500cr/$5, 1K/$10, 5K/$40)
 - [ ] Payment integration (Stripe, shared with brand flow)
 - [ ] Mint purchased credits from locked supply
@@ -239,45 +417,45 @@ Displayed next to creator names throughout the platform (feed, leaderboard, prof
 
 All tools cost credits per use (credits return to circulating supply).
 
-#### Phase 11: Hook Generator
+#### Phase 17: Hook Generator
 - [ ] AI-powered hook writing UI (input: topic/niche → output: hook variations)
 - [ ] Hook style templates (question, bold claim, story, stat, etc.)
 - [ ] Save/favorite hooks
 - [ ] Credit cost per generation
 
-#### Phase 12: X Profile Audit
+#### Phase 18: X Profile Audit
 - [ ] Pull profile data (bio, banner, pinned tweet, metrics)
 - [ ] AI analysis + scoring (bio clarity, CTA, banner quality, niche alignment)
 - [ ] Actionable suggestions with before/after examples
 - [ ] Credit cost per audit
 
-#### Phase 13: Hook Analyzer
+#### Phase 19: Hook Analyzer
 - [ ] Paste tweet URL → breakdown of hook mechanics
 - [ ] Score: scroll-stopping power, curiosity gap, emotional trigger
 - [ ] Compare hooks side-by-side
 - [ ] Credit cost per analysis
 
-#### Phase 14: Brand & Niche Positioning
+#### Phase 20: Brand & Niche Positioning
 - [ ] Guided questionnaire (expertise, audience, values, competitors)
 - [ ] AI-generated positioning statement + niche recommendation
 - [ ] Content angle suggestions based on positioning
 - [ ] Credit cost per session
 
-#### Phase 15: Content Pillar Tracker
+#### Phase 21: Content Pillar Tracker
 - [ ] Define 3–5 content pillars
 - [ ] Tag posts by pillar
 - [ ] Weekly balance tracker (are you posting evenly across pillars?)
 - [ ] Suggestions when a pillar is underrepresented
 - [ ] Credit cost: free to track, costs credits for AI suggestions
 
-#### Phase 16: Viral Tweet Pattern Library
+#### Phase 22: Viral Tweet Pattern Library
 - [ ] Curated library of proven tweet formats/templates
 - [ ] Filter by category (thread, single, engagement bait, educational, story)
 - [ ] "Use this template" → pre-filled draft with placeholders
 - [ ] Community-submitted patterns (voted by creators)
 - [ ] Credit cost per template unlock (or free browse, pay to use)
 
-#### Phase 17: Story-to-Content Generator
+#### Phase 23: Story-to-Content Generator
 - [ ] Input: paste a story, experience, or lesson learned
 - [ ] AI outputs: tweet thread, single tweet variations, hook options
 - [ ] Tone selector (professional, casual, spicy, inspirational)
@@ -287,25 +465,25 @@ All tools cost credits per use (credits return to circulating supply).
 
 ### PART 4: ADVANCED TOOLS (Post-Launch)
 
-#### Phase 18: Reply Game Coach
+#### Phase 24: Reply Game Coach
 - [ ] Surface high-traffic tweets in creator's niche
 - [ ] AI-suggested reply drafts
 - [ ] Track reply performance (likes, follows gained)
 - [ ] Credit cost per batch of suggestions
 
-#### Phase 19: Post Autopsy
+#### Phase 25: Post Autopsy
 - [ ] Paste any tweet URL → full performance breakdown
 - [ ] Analysis: hook strength, format, timing, engagement ratio
 - [ ] "Why it worked" / "Why it flopped" AI explanation
 - [ ] Credit cost per autopsy
 
-#### Phase 20: Collab Matchmaker
+#### Phase 26: Collab Matchmaker
 - [ ] Match creators by niche, audience size, engagement rate
 - [ ] Suggest collab types (QT exchange, thread collab, Space co-host)
 - [ ] In-app collab requests
 - [ ] Credit cost per match batch
 
-#### Phase 21: Content Calendar
+#### Phase 27: Content Calendar
 - [ ] Weekly/monthly calendar view
 - [ ] Assign content pillars to days
 - [ ] AI-suggested posting schedule based on audience activity

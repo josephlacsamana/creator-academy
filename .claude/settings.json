@@ -13,7 +13,14 @@
       "WebFetch(domain:protokols.com)",
       "WebFetch(domain:elfa.ai)",
       "WebFetch(domain:www.protokols.io)",
-      "WebFetch(domain:docs.protokols.io)"
+      "WebFetch(domain:docs.protokols.io)",
+      "WebFetch(domain:rapidapi.com)",
+      "WebFetch(domain:twttrapi.com)",
+      "WebFetch(domain:sociavault.com)",
+      "WebFetch(domain:www.netrows.com)",
+      "WebFetch(domain:v2.rapidapi.com)",
+      "WebFetch(domain:docs.twitterapi.io)",
+      "WebFetch(domain:twitterapi.io)"
     ]
   }
 }

@@ -10,6 +10,7 @@ import { Leaderboard } from "@/pages/Leaderboard";
 import { Profile } from "@/pages/Profile";
 import { Tools } from "@/pages/Tools";
 import { AuthCallback } from "@/pages/AuthCallback";
+import { DemoFeed } from "@/pages/DemoFeed";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
@@ -22,6 +23,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
+      <Route path="/demo" element={<DemoFeed />} />
       <Route
         element={
           <ProtectedRoute>

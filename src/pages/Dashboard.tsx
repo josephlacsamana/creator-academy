@@ -18,7 +18,6 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import type { TransactionType } from "@/types/database";
-import { CreatorName } from "@/components/ui/CreatorName";
 
 const TX_ICONS: Record<TransactionType, typeof Heart> = {
   earn: ArrowDownLeft,
@@ -106,6 +105,24 @@ export function Dashboard() {
           </div>
         ))}
       </div>
+
+      {/* Weekly stats */}
+      {stats && (stats.spentWeekly > 0 || stats.collectedWeekly > 0) && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <p className="text-sm text-muted-foreground">Spent This Week</p>
+            <p className="mt-1 text-xl font-semibold text-red-500">
+              {formatCredits(stats.spentWeekly)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <p className="text-sm text-muted-foreground">Collected This Week</p>
+            <p className="mt-1 text-xl font-semibold text-green-600">
+              {formatCredits(stats.collectedWeekly)}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Quick actions */}
       <div className="grid gap-4 sm:grid-cols-2">

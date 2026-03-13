@@ -65,12 +65,35 @@ export function useDashboardStats() {
         .eq("user_id", user!.id)
         .eq("status", "active");
 
+      // Weekly stats
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      const weekISO = weekAgo.toISOString();
+
+      const { data: spentWeek } = await supabase
+        .from("transactions")
+        .select("amount")
+        .eq("user_id", user!.id)
+        .eq("type", "spend")
+        .gte("created_at", weekISO);
+
+      const { data: collectedWeek } = await supabase
+        .from("transactions")
+        .select("amount")
+        .eq("user_id", user!.id)
+        .eq("type", "earn")
+        .gte("created_at", weekISO);
+
       const spent = spentToday?.reduce((sum, t) => sum + Math.abs(t.amount), 0) ?? 0;
       const collected = collectedToday?.reduce((sum, t) => sum + t.amount, 0) ?? 0;
+      const spentWeekly = spentWeek?.reduce((sum, t) => sum + Math.abs(t.amount), 0) ?? 0;
+      const collectedWeekly = collectedWeek?.reduce((sum, t) => sum + t.amount, 0) ?? 0;
 
       return {
         spentToday: spent,
         collectedToday: collected,
+        spentWeekly,
+        collectedWeekly,
         pendingEngagements: pendingCount ?? 0,
         activeRequests: activeRequests ?? 0,
       };
